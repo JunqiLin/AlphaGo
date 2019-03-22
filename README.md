@@ -1,2 +1,2 @@
 # AlphaGo
-Event-Driven Backtesting with Python
+Backtester with Python

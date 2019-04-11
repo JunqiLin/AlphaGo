@@ -5,37 +5,44 @@ Created on Thu Mar 14 18:48:43 2019
 
 @author: linjunqi
 """
-from data import HistoricCSVDataHandler
+from data import HistoricCsvDataHandler,HistoricWebDataHandler
 import event as ev
 from Portfolio import NaivePortfolio
-from Strategy import BuyAndHoldStrategy, DownBuyStrategy
+from Strategy import BuyAndHoldStrategy, DownBuyStrategy,DownAndBuyStrategyTest
 from execution import SimulatedExecutionHandler
 import Queue
 import time
+from datetime import date
 
 events = Queue.Queue()
 
-bars = HistoricCSVDataHandler(events,'/Users/linjunqi/Downloads/OnePy_Old-master',["000001","000002"])
+#bars = HistoricCSVDataHandler(events,'/Users/linjunqi/Downloads/OnePy_Old-master',["000001","000002"])
+#
+#
+#strategy = DownBuyStrategy(bars,events)
+#port = NaivePortfolio(bars, events,'2014/1/2', initial_capital = 100000.0)
+#broker = SimulatedExecutionHandler(events)
+#timelen = len(bars.symbol_data['000002'])
 
-#df=bars.symbol_data['000001']
-#print(df.loc[['2014/1/2','2014/1/3'],:] )
-#strategy = BuyAndHoldStrategy(bars,events)
-strategy = DownBuyStrategy(bars,events)
+
+trainStartDate = date(2015,1,1)
+trainEndDate = date(2017,6,1)
+bars = HistoricCsvDataHandler(events,os.getcwd()+'/data',["000001","000002"])
+
+#bars = HistoricWebDataHandler(events,['WIKI/AAPL','WIKI/MSFT'],trainStartDate,trainEndDate)   
+strategy = DownAndBuyStrategyTest(bars,events)
 port = NaivePortfolio(bars, events,'2014/1/2', initial_capital = 100000.0)
 broker = SimulatedExecutionHandler(events)
-timelen = len(bars.symbol_data['000002'])
-print(bars.symbol_data['000001'][:5])
-print(bars.symbol_data['000002'][:5])
-#timelen = 2
+timelen = len(bars.total_symbol_data['000001'])
 
 
+print("here")
 
 iter_ = 0
 while True:
     iter_ = iter_+1
     if(iter_>=timelen):
         port.calculate_portfolio_returns()
-        #scaleanchor = "x",print(port.equity_curve.tail())
         print(port.equity_curve.tail())
         port.draw_curve()
         break
@@ -48,6 +55,7 @@ while True:
     
     # Handle the events
     while True:
+        
         try:
             event = events.get(False)
         except Queue.Empty:
@@ -55,6 +63,7 @@ while True:
         else:
             if event is not None:
                 if event.type == 'MARKET':
+                    
                     strategy.calculate_signals(event)
                     port.update_timeindex(event)
 
@@ -69,5 +78,3 @@ while True:
                     port.update_fill(event)
     
     
-    # 10-Minute heartbeat
-#    time.sleep(0.1*60)

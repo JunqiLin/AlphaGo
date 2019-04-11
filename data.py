@@ -10,26 +10,21 @@ import os, os.path
 import pandas as pd
 from abc import ABCMeta, abstractmethod
 from event import MarketEvent
+import quandl
+from datetime import date
+quandl.ApiConfig.api_key = "nJisbyjbJ9ghcE9jsz6r"
+
 
 class DataHandler(object):
     """
-    DataHandler is an abstract base class providing an interface for
-    all subsequent (inherited) data handlers (both live and historic).
-
-    The goal of a (derived) DataHandler object is to output a generated
-    set of bars (OLHCVI) for each symbol requested. 
-
-    This will replicate how a live strategy would function as current
-    market data would be sent "down the pipe". Thus a historic and live
-    system will be treated identically by the rest of the backtesting suite.
+    
     """
     __metaclass__ = ABCMeta
     @abstractmethod
     
     def get_latest_bars(self, symbol, N=1):
         """
-        Returns the last N bars from the latest_symbol list,
-        or fewer if less bars are available.
+        
         """
         raise NotImplementedError("Should implement get_latest_bars()")
 
@@ -42,117 +37,151 @@ class DataHandler(object):
         """
         raise NotImplementedError("Should implement update_bars()")
     
-class HistoricCSVDataHandler(DataHandler):
-    def __init__(self, events, csv_dir, symbol_list):
+
+        
+class HistoricCsvDataHandler():
+    """
+    get symbol_list data from file
+    """
+    def __init__(self, events,file_dir, symbol_list):
         self.events = events
-        self.csv_dir = csv_dir
-        self.symbol_list = symbol_list
-        
-        self.symbol_data={}
-        self.latest_symbol_data={}
+        self.file_dir = file_dir
+        self.symbol_list = symbol_list      
+        self.total_symbol_data={}
+        self.symbol_latest_data={}
         self.continue_backtest = True
-        self._open_convert_csv_files()
-        self.get_bars()
+        self._get_data_from_files()
+#        self.get_bars()
         
-    def _open_convert_csv_files(self):
-        comb_index = None
-        for s in self.symbol_list:
-            
-            self.symbol_data[s]=pd.read_csv(os.path.join(self.csv_dir,'%s.csv'%s), header = 0,
-                        index_col = 0, names=['datetime', 'open', 'low', 'high', 'close','volume','oi']
-                            )
-            # Combine the index to pad forward values
-            #make each value size equals
-            if comb_index is None:
-                comb_index = self.symbol_data[s].index
-            else:
-                comb_index.union(self.symbol_data[s].index)
+    def _get_data_from_files(self):
+        """
+        open file and transfer data to dataframe
+        """
+        for symbol in self.symbol_list:
+            self.total_symbol_data[symbol]=pd.read_csv(os.path.join(self.file_dir,'%s.csv'%symbol), header = 0,index_col = 0, names=['datetime', 
+                                  'open', 'low', 'high', 'close','volume','oi'])
                 
-            self.latest_symbol_data[s]=[]
-            # Reindex the dataframes
-#        for s in self.symbol_list:
-#            self.symbol_data[s] = self.symbol_data[s].reindex(index=comb_index, method='pad')
-        
-        
-    def _get_new_bar(self, symbol):
+            self.symbol_latest_data[symbol]=[]
+            
+    def update_bars(self):
         """
-        Return the lastest bar from the data feed as a tuple of 
-        (symbol,datetime,open, hign ,low ,close,volume)
+        put MarketEvent to event queue
         """
+        self.events.put(MarketEvent())
         
-        df = self.symbol_data[symbol]
-        
-        lenth = len(df)
-        
-        for i in range(lenth):
-            yield ({'symbol':symbol, 'date':str(df.index[i]),
+    def get_latest_bars(self, symbol,n):
+        """
+        get the latest N days data
+        """
+        bars_list=[]
+        ##dataframe
+        df = self.total_symbol_data[symbol].tail(n)
+        for i in range(n):
+            item = {'symbol':symbol, 'date':str(df.index[i]),
                     'open':df[['open']].iat[i,0],
                     'low':df[['low']].iat[i,0],
                     'high':df[['high']].iat[i,0],
                     'close':df[['close']].iat[i,0],
-                    'volume':df[['volume']].iat[i,0]})
+                    'volume':df[['volume']].iat[i,0]}
+            bars_list.append(item)
+        return bars_list
     
-    
-    def get_latest_bars(self,symbol,N=1):
-        try:
-            bars_list = self.latest_symbol_data[symbol]
+    def get_n_bars(self, symbol, n):
+        """
+        get N-th day bar (index from 0)
+        """
+        if n<len(self.total_symbol_data[symbol]):
+            df = self.total_symbol_data[symbol].iloc[n,:]
+            item = {'symbol':symbol, 'date':str(df.name),
+                    'open':df['open'],
+                    'low':df['low'],
+                    'high':df['high'],
+                    'close':df['close'],
+                    'volume':df['volume']}
+            return item
+        else:
+            print('N-th bar is out of range')
+            return
+        
+
+
+class HistoricWebDataHandler(DataHandler):
+    """
+    get symbol_list data from Web
+    """
+    def __init__(self, events, symbol_list, start, end):
+        self.events = events
+        self.symbol_list = symbol_list
+        self.start = start
+        self.end = end
+        
+        """
+        total_symbol_data:   dict{'symbol':'dataframe data'}
+        """
+        self.total_symbol_data= {}
+        self.symbol_latest_data={}
+        self.continue_backtest = True
+        
+        self._get_data_from_web()
+
+        
+    def _get_data_from_web(self):
+        """
+        use quandl to get historical data from web
+        """
+        for symbol in self.symbol_list:
+            symbol_data = quandl.get(symbol, start_date=self.start, end_date=self.end)
+            self.total_symbol_data[symbol] = symbol_data
             
-        except KeyError:
-            print("The symbol is not available in the historiacal data")
-        else:
-            return bars_list[-N:]
-        
-    def get_bar_byN(self, symbol, N):
-        if N<len(self.latest_symbol_data[symbol]):
-            bar = self.latest_symbol_data[symbol][N]
-            print("******")
-            print(bar)
-            print("******")
-            return bar
-        else:
-            print("backtest over ")
-            return None
-#        try:
-#            bar = self.latest_symbol_data[symbol][N]
-#        except KeyError:
-#            print('backtest over')
-#        else:
-#            return bar
-        
-    def get_bars(self):
-        for s in self.symbol_list:
-            for item in self._get_new_bar(s):
-                self.latest_symbol_data[s].append(item)
-                
+            
     def update_bars(self):
         """
-        push the latest bar to the latest_symbol_data structure
-        for all symbols in the symbol list.
+        put MarketEvent to event queue
         """
-#        for s in self.symbol_list:
-#            try:
-#                bar = self._get_new_bar(s).next()
-#            except StopIteration:
-#                print("Stop")
-#                self.continue_backtest = False
-#            else:
-#                
-#                if bar is not None:
-#                    self.latest_symbol_data[s].append(bar)
-        
-#        #use
-#        for s in self.symbol_list:
-#            for item in self._get_new_bar(s):
-#                self.latest_symbol_data[s].append(item)
-                    
-                
         self.events.put(MarketEvent())
         
-#    def test(self):
-#        result = self._get_new_bar(self.symbol_list[0])
-#        print(result.next())
+    
+    """
+    get bars return by the format type==dict, key:symbol,open,low,high,close,volume
+    """
+    
+    
+    def get_latest_bars(self, symbol,n):
+        """
+        get the latest N days data
+        """
+        bars_list=[]
+        ##dataframe
+        df = self.total_symbol_data[symbol].tail(n)
+        for i in range(n):
+            item = {'symbol':symbol, 'date':str(df.index[i]),
+                    'open':df[['Open']].iat[i,0],
+                    'low':df[['Low']].iat[i,0],
+                    'high':df[['High']].iat[i,0],
+                    'close':df[['Close']].iat[i,0],
+                    'volume':df[['Volume']].iat[i,0]}
+            bars_list.append(item)
+        return bars_list
         
-#a = HistoricCSVDataHandler('MARKET','/Users/linjunqi/Downloads/OnePy_Old-master',["000001"])
-#a.test()
-        
-        
+    
+    def get_n_bars(self, symbol, n):
+        """
+        get N-th day bar (index from 0)
+        """
+        df = self.total_symbol_data[symbol].iloc[n,:]
+        item = {'symbol':symbol, 'date':str(df.name),
+                    'open':df['Open'],
+                    'low':df['Low'],
+                    'high':df['High'],
+                    'close':df['Close'],
+                    'volume':df['Volume']}
+        return item
+    
+
+#trainStartDate = date(2015,1,1)
+#trainEndDate = date(2017,6,1)
+#bars = HistoricWebDataHandler('marker',['WIKI/AAPL'],trainStartDate,trainEndDate)   
+##print(bars.get_latest_bars('WIKI/AAPL',5))
+#
+#print(bars.get_n_bars('WIKI/AAPL',1))
+     

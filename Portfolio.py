@@ -20,6 +20,9 @@ import matplotlib
 matplotlib.style.use('ggplot')
 import plotly.offline as py
 import plotly.graph_objs as go
+
+
+
 #plotly.tools.set_credentials_file(username='JunqiLIN', api_key='lr1c37zw81')
 
 class Portfolio(object):
@@ -47,12 +50,10 @@ class Portfolio(object):
 
 class NaivePortfolio(Portfolio):
      """
-     
+     position
+     holding
      """
      def __init__(self, bars, events, start_date, initial_capital = 100000.0):
-        """
-        
-        """
         self.bars = bars
         self.events = events
         self.symbol_list = self.bars.symbol_list
@@ -67,8 +68,12 @@ class NaivePortfolio(Portfolio):
         
      def construct_all_positions(self):
         """
-        Constructs the positions list using the start_date
-        to determine when the time index will begin.
+        all_positions
+        
+        Constructs the positions 
+        {'symbol1': 0,
+         'symbol2':2, 
+         'datetime':start_date}
         """
         d = dict((k,v) for k,v in [(s,0) for s in self.symbol_list])
         d['datetime']= self.start_date
@@ -76,8 +81,15 @@ class NaivePortfolio(Portfolio):
     
      def construct_all_holdings(self):
         """
-        Constructs the holdings list using the start_date
-        to determine when the time index will begin.
+        all_holdings
+        
+        Constructs the holdings 
+        {'symbol1':0,
+         'symbol2':0,
+         'datetime':start_date,
+         'cash':initial_capital
+         'commission':0, 
+         'total':initial_capital}
         """
         d = dict((k,v) for k,v in [(s,0) for s in self.symbol_list])
         d['datetime']= self.start_date
@@ -85,9 +97,16 @@ class NaivePortfolio(Portfolio):
         d['commission']=0.0
         d['total']=self.initial_capital
         return [d]
+    
      def construct_current_holdings(self):
         """
+        current_holdings
         
+        {'symbol1':0,
+         'symbol2':0,
+         'cash':initial_capital
+         'commission':0, 
+         'total':initial_capital}
         """
         d = dict((k,v) for k,v in[(s,0) for s in self.symbol_list])
         d['cash'] = self.initial_capital
@@ -97,20 +116,12 @@ class NaivePortfolio(Portfolio):
     
      def update_timeindex(self, event):
         """
-        
+        every day update position and holding
         """
         bars = {}
-        
-#        for sym in self.symbol_list:
-#            bars[sym] = self.bars.get_bar_byN(sym ,self.index_)
-        print(self.index_)
         for sym in self.symbol_list:
             bars[sym] = self.bars.get_n_bars(sym, self.index_)
-            if bars[sym] is None:
-                print('%s is out of range'%(sym))
-                return
-                
-            
+                       
         self.index_ += 1
         #Update position
         dp = dict((k,v) for k,v in [(s,0) for s in self.symbol_list])
@@ -129,10 +140,16 @@ class NaivePortfolio(Portfolio):
         dh['total'] = self.current_holdings['cash']
         
         for s in self.symbol_list:
+            
             #Approximation to the real value 
-            market_value = self.current_positions[s]*bars[s]['close']
-            dh[s] = market_value
-            dh['total'] += market_value
+            if bars[s]['close']!=0:
+                market_value = self.current_positions[s]*bars[s]['close']
+                dh[s] = market_value
+                dh['total'] += market_value
+            else:
+                market_value = self.all_holdings[-1][s]
+                dh[s] = market_value
+                dh['total']+=market_value
             
         self.all_holdings.append(dh)
         
@@ -141,6 +158,7 @@ class NaivePortfolio(Portfolio):
         list of dictionaries.
         """
         curve = pd.DataFrame(self.all_holdings)
+        ##make datetime as index
         curve.set_index('datetime', inplace=True)
         curve['returns'] = curve['total'].pct_change()
         curve['equity_curve'] = (1.0+curve['returns']).cumprod()
@@ -190,7 +208,7 @@ class NaivePortfolio(Portfolio):
         
      def generate_down_order(self,signal):
         """
-        
+        According DownAndBuyStrategy to make order to generate the OrderEvent
         """
         order = None
         
@@ -217,143 +235,145 @@ class NaivePortfolio(Portfolio):
             order = OrderEvent(symbol, order_type, abs(cur_quantity),'BUY',price,datetime)
         
         return order
-     def generate_naive_order(self, signal):
-        """
-        
-        """
-        order = None
-        
-        symbol = signal.symbol
-        direction = signal.signal_type
-        strength = signal.strength
-        
-        mkt_quantity = floor(100 * strength)
-        cur_quantity = self.current_positions[symbol]
-        order_type = 'MKT'
-        price = signal.price
-        datetime = signal.datetime
-        if direction == 'LONG' and cur_quantity == 0 :
-            
-            order = OrderEvent(symbol, order_type, mkt_quantity, 'BUY',price,datetime)
-        if direction == 'SHORT' and cur_quantity == 0:
-            
-            order = OrderEvent(symbol, order_type, mkt_quantity, 'SELL',price,datetime)
-        if direction =='EXIT' and cur_quantity >0:
-            
-            order = OrderEvent(symbol, order_type, abs(cur_quantity),'SELL',price,datetime)
-        if direction =='EXIT' and cur_quantity <0:
-            
-            order = OrderEvent(symbol, order_type, abs(cur_quantity),'BUY',price,datetime)
-        
-        return order
+
 
      def update_signal(self, event):
         """
-        Acts on a SignalEvent to generate new orders 
-        based on the portfolio logic.
+        put signal event into queue
         """
         if event.type == 'SIGNAL':
-#            order_event = self.generate_naive_order(event)
+
             order_event = self.generate_down_order(event)
             self.events.put(order_event)
             
             
-        
-            
-            
-     def output_summary_stats(self):
-        """
-        
-        """
-        total_return = self.equity_curve['equity_curve'][-1]
-        returns = self.equity_curve['returns']
-        pnl = self.equity_curve['equity_curve']
-        
-        sharpe_ratio = create_sharpe_ratio(returns)
-        max_dd, dd_duration = create_drawdowns(pnl)
-        
-        stats = [("Total Return", "%0.2f%%" %((total_return - 1.0)*100.0)),
-                 ("Sharpe Ratio","%0.2f"% sharpe_ratio),
-                 ("Max DrawDown","%0.2f%%"%(max_dd*100.0)),
-                 ("Drawdown Duration","%d"%dd_duration)]
-        return stats
-     
-        
-     def calculate_portfolio_returns(self):
-
-        print(self.all_holdings[-1:])
-        print("**********")
-        print(self.all_positions[-1:])
+#        
+#            
+#            
+#     def output_summary_stats(self):
+#        """
+#        
+#        """
+#        total_return = self.equity_curve['equity_curve'][-1]
+#        returns = self.equity_curve['returns']
+#        pnl = self.equity_curve['equity_curve']
+#        
+#        sharpe_ratio = create_sharpe_ratio(returns)
+#        max_dd, dd_duration = create_drawdowns(pnl)
+#        
+#        stats = [("Total Return", "%0.2f%%" %((total_return - 1.0)*100.0)),
+#                 ("Sharpe Ratio","%0.2f"% sharpe_ratio),
+#                 ("Max DrawDown","%0.2f%%"%(max_dd*100.0)),
+#                 ("Drawdown Duration","%d"%dd_duration)]
+#        return stats
+#     
+#        
+#     def calculate_portfolio_returns(self):
+#
+#        print(self.all_holdings[-1:])
+#        print("**********")
+#        print(self.all_positions[-1:])
     
      def draw_curve(self):
          """
+         dataframe format:
+         datetime(index)
+         symbol1
+         symbol2
+         cash
+         commission
+         total
+         returns
+         equity_curve
          """
+         data = []
          curve = self.equity_curve
-         trace0 = go.Scatter(
+         curve.to_csv("curve.csv",index = True,sep=',')
+         total = go.Scatter(
                  x = curve.index,
                  y = curve['total'],
-                 )
-         marketvone = go.Scatter(
-                 x = curve.index,
-#                 y = curve['WIKI/AAPL']
-                 y = curve['000001']
-                 )
-         marketvtwo = go.Scatter(
-                 x = curve.index,
-#                 y = curve['WIKI/MSFT']
-                 y = curve['000002']
-                 )
+                 name = 'total')
+         data.append(total)
          
-
-         trace1 = go.Scatter(
-                 x = curve.index,
-                 y = curve['cash'],
-                 yaxis = "y2"
-                 )
-
-
-         trace4 = go.Scatter(
-                 x = curve.index,
-                 y = curve['commission'],
-                 yaxis = "y5"
-                 )
          
-         data = [trace0,marketvone,marketvtwo,trace1,trace4]
-
-                 
-#                 
-         layout = go.Layout(
-                 width = 2000,
-                 title = "fixed-ratio axes",
-                 xaxis = dict(
-                         nticks = 10,
-                         domain = [0, 0.45],
-                         title = "shared X axis"
-                         ),
-                 yaxis = dict(
-                         scaleanchor = "x",
-                         domain = [0, 0.45],
-                         title = "1:1"
-                         ),
-                yaxis2 = dict(
-                        scaleanchor = "x",
-                        scaleratio = 0.2,
-                        domain = [0.45,0.85],
-                        title = "1:5"
-                        ),
-                yaxis5 = dict(
-                        domain=[0.85,1],
-                        scaleanchor = "x",
-                        title="1:8"),
-                        showlegend= False
-                        )
-         fig = go.Figure(data=data, layout=layout)
+         for symbol in self.symbol_list:
+             s = go.Scatter(
+                         x = curve.index,
+                         y = curve[symbol],
+                         name = str(symbol))
+             data.append(s)
+             
+         fig = go.Figure(data=data)
          py.plot(fig, filename = "aspect-ratio")
-        
-        
+         
+#         curve = self.equity_curve
+#         curve.to_csv("curve.csv",index=True,sep=',')
+#         trace0 = go.Scatter(
+#                 x = curve.index,
+#                 y = curve['total'],
+#                 )
+#         marketvone = go.Scatter(
+#                 x = curve.index,
+##                 y = curve['WIKI/AAPL']
+#                 y = curve['000001']
+#                 )
+#         marketvtwo = go.Scatter(
+#                 x = curve.index,
+##                 y = curve['WIKI/MSFT']
+#                 y = curve['000002']
+#                 )
+#         
+#
+#         trace1 = go.Scatter(
+#                 x = curve.index,
+#                 y = curve['cash'],
+#                 yaxis = "y2"
+#                 )
+#
+#
+#         trace4 = go.Scatter(
+#                 x = curve.index,
+#                 y = curve['commission'],
+#                 yaxis = "y5"
+#                 )
+#         
+#         data = [trace0,marketvone,marketvtwo,trace1,trace4]
+#
+#                 
+#                
+#         layout = go.Layout(
+#                 width = 2000,
+#                 title = "fixed-ratio axes",
+#                 xaxis = dict(
+#                         nticks = 10,
+#                         domain = [0, 0.45],
+#                         title = "shared X axis"
+#                         ),
+#                 yaxis = dict(
+#                         scaleanchor = "x",
+#                         domain = [0, 0.45],
+#                         title = "1:1"
+#                         ),
+#                yaxis2 = dict(
+#                        scaleanchor = "x",
+#                        scaleratio = 0.2,
+#                        domain = [0.45,0.85],
+#                        title = "1:5"
+#                        ),
+#                yaxis5 = dict(
+#                        domain=[0.85,1],
+#                        scaleanchor = "x",
+#                        title="1:8"),
+#                        showlegend= False
+#                        )
+#         fig = go.Figure(data=data, layout=layout)
+#         py.plot(fig, filename = "aspect-ratio")
+
+
+
+
+
     
-        
-        
         
         
         

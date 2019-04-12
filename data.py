@@ -100,8 +100,14 @@ class HistoricCsvDataHandler():
                     'volume':df['volume']}
             return item
         else:
-            print('N-th bar is out of range')
-            return
+            item = {'symbol':0, 'date':0,
+                    'open':0,
+                    'low':0,
+                    'high':0,
+                    'close':0,
+                    'volume':0}
+            print('%s-th bar is out of range'%(n))
+            return item
         
 
 
